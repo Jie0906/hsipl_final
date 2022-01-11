@@ -1,376 +1,343 @@
+import time
 import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.metrics import mean_squared_error
-import time
 
-start_pixel = 170
+
+def woodBury (temp,X,Y):
+    XT = np.transpose(X)
+    YT = np.transpose(Y) 
+
+    return temp - [(temp@XT) @ (YT @ temp)/(1 + YT @ temp @ XT)]
+
+def R (him):
+    
+    N = him.shape[0]
+    ri = np.reshape(him,(N,him.shape[1]))
+    rit = np.transpose(ri)
+    R = np.dot(rit,(ri))/N
+    
+    return R
 
 
 def K (him):
 
     N = him.shape[0]
-
     ri = np.reshape(him,(N,him.shape[1]))
-    u = (np.mean(np.transpose(ri), 1))
+    rit = np.transpose(ri)
+    u = (np.mean(rit, 1))
     K = np.dot(np.transpose(ri-u),(ri-u))/N
 
     return u,K
 
 
 
-def R (him):
-    
-    N = him.shape[0]
+
+def R_RXD(him):
+
+    N = him.shape[0] #64*64 = 4096
+    r = R(him)
+    invr = np.linalg.inv(r)
     ri = np.reshape(him,(N,him.shape[1]))
-    R = np.dot(np.transpose(ri),(ri))/N
+
+    R_RXD = np.zeros(N)
+    for i in range(N):
+        R_RXD[i] = ri[i] @ invr @ np.reshape(ri,(him.shape[0],1))
+
+
+    return invr, R_RXD   
+
+
+def K_RXD (him):
+
+    N = him.shape[0] #64*64 = 4096
+    u,k = K(him)
+    invk = np.linalg.inv(k)
+    ri = np.reshape(him,(N,him.shape[1]))
+
+    K_RXD = np.zeros(N)
+    for i in range(N):
+        ru = ri[i,:]-u
+        K_RXD[i] = ru @ invk @ np.reshape(ru,(him.shape[0],1))
+
+    return invk, u, K_RXD
+
+
+
+
+def CR_RXD(ri,himImg):
+
+    bands = ri.shape[0]
+    r = R(himImg)
+    invr = np.linalg.inv(r)
+    CR_RXD = ri @ invr @ np.reshape(ri,(1,bands))
+
+    return CR_RXD
     
-    return R
-
-
-def Woodbury (invA,U,V):
-
-    VT = V
-    V = np.transpose(V)
-    U = np.transpose(U)
-    invW = invA - (invA@U)@(VT@invA)/(1 + VT@invA@U)
     
-    return invW
 
 
-def k_rxd (him):
+def CK_RXD(ri,himImg):
 
-    N = him.shape[0]
-    try:
-        u,Ka = K(him)
-        invK = np.linalg.inv(Ka)
-    except :
-        u,Ka = K(him)
-        invK = np.linalg.pinv(Ka)
-    r = np.reshape(him,(N,him.shape[1]))
-    k_rxd = np.zeros(N)
-    for p in range(N):
-        ru = (r[p,:]-u)
-        k_rxd[p] = ru@invK@np.reshape(ru,(ru.shape[0],1))
-    img = k_rxd
+    bands = ri.shape[0]
+    u,k = K(himImg)
+    invk = np.linalg.inv(k)
+    ru = ri - u
+    CK_RXD = ru @ invk @ np.reshape(ru,(1,bands))
 
-    return invK,u,img
+    return u, CK_RXD
 
 
-def r_rxd(him):
-
-    N = him.shape[0]
-    try:
-        invR = np.linalg.inv(R(him))
-    except :
-        invR = np.linalg.pinv(R(him))
-    r = np.reshape(him,(N,him.shape[1]))
-    r_rxd = np.zeros(N)
-    for p in range(N):
-        r_rxd[p] = r[p]@invR@np.reshape(r[p],(r[p].shape[0],1))
-    img = r_rxd
-    return invR,img
-
-def cr_rxd(r,current_img):
-
-    band = r.shape[0]
-    try:
-        invR = np.linalg.inv(R(current_img))
-    except :
-        invR = np.linalg.pinv(R(current_img))
-    cr_rxd = np.reshape(r,(1,band)) @ invR @ r
-    pixel = cr_rxd
-    
-    return pixel
+def RT_CR_RXD(ri,n,pre_R):
+    bands = ri.shape[1] 
+    rt = np.reshape(ri,(bands,1))
+    a = np.linalg.inv(((n-1)/n)*pre_R)
+    b = c = 1/np.sqrt(n)*ri
+    invR = woodBury(a, b, c)
+    img = ri @ invR @ rt
+    return invR, img
 
 
-def ck_rxd(r,current_img):
+def RT_CK_RXD(ri,n,pre_K,pre_u):
+    bands = ri.shape[1]
+    ri = np.reshape(ri,(1,ri.shape[1]))
+    u = (1-1/n) * pre_u + (1/n)*ri
+    a = np.linalg.inv((1-1/n)*pre_K)
+    b = c = (np.sqrt((n-1))/n)*(pre_u-ri) 
+    invK = woodBury(a, b, c)
+    ru = ri-u
+    pixel = ru @ invK @ np.reshape(ru,(bands,1))
 
-    band = r.shape[0]
-    try:
-        u,Ka = K(current_img)
-        invK = np.linalg.inv(Ka)
-    except :
-        u,Ka = K(current_img)
-        invK = np.linalg.pinv(Ka)
-    ru = r - u
-    ck_rxd = np.reshape(ru,(1,band)) @ invK @ ru
-    pixel = ck_rxd
-
-    return u,pixel
-
-
-def rt_cr_rxd(r,n,pre_R):
-
-    band = r.shape[1] 
-    rt = np.reshape(r,(band,1))
-    parA = ((n-1)/n)*pre_R
-    parU = 1/np.sqrt(n)*r
-    parV = parU 
-    parA = np.linalg.inv(parA)
-    invR = Woodbury(parA,parU,parV)
-    pixel = r@invR@rt
-    return invR,pixel
-
-
-def rt_ck_rxd(r,n,pre_K,pre_u):
-    
-    r = np.reshape(r,(1,169))
-    u = (1-1/n) * pre_u + (1/n)*r
-    band = r.shape[1]
-    parA = (1-1/n)*pre_K
-    parU = (np.sqrt((n-1))/n)*(pre_u-r) 
-    parV =  parU
-    parA = np.linalg.inv(parA)
-    invK = Woodbury(parA,parU,parV)
-    pixel = (r-u) @ invK @ np.reshape(r-u,(band,1))
-
-    return invK,u,pixel
+    return invK, u, pixel
 
    
-def print_r_rxd(him,plot):
+def R_RXD_PLOT(him):
     
-    invR,img = r_rxd(him)
-    rs_img = np.zeros((64, 64))
-    rs_img = np.reshape(img,(64,64))
-    if plot== True:
-        plt.figure()
-        plt.title("R-RXD")
-        plt.axis("off")
-        plt.imshow(rs_img,'gray')
+    x,img = R_RXD(him)
+    tempImg = np.zeros((64, 64))
+    tempImg = np.reshape(img,(64,64))
+    plt.figure()
+    plt.title("R-RXD")
+    plt.axis("off")
+    plt.imshow(tempImg,cmap='gray')
     return img
 
-def print_k_rxd(him,plot):
+def K_RXD_PLOT(him):
 
-    invK,u,img = k_rxd(him)
-    rs_img = np.zeros((64, 64))
-    rs_img = np.reshape(img,(64,64))
-    if plot== True:
-        plt.figure()
-        plt.title("K-RXD")
-        plt.axis("off")
-        plt.imshow(rs_img,'gray')
+    x,y,img = K_RXD(him)
+    tempImg = np.zeros((64, 64))
+    tempImg = np.reshape(img,(64,64))
+    
+    plt.figure()
+    plt.title("K-RXD")
+    plt.axis("off")
+    plt.imshow(tempImg,cmap='gray')
     return img
 
+
+def FUN_RXD_PLOT(him,status,fun):
+    str = ''
+    N = him.shape[0] #4096
+    ln = int(np.sqrt(N))
+    temparr = []
+    Time = []
+    tempImg = np.zeros((ln,ln))
+    rtImg = np.zeros(N)
     
-def print_cr_rxd(him,plot):
-    
-    if plot == True:
-        plt.figure("cr_rxd")
-        plt.title("CR-RXD")
-        plt.axis("off")
-        ax = plt.subplot2grid((1, 1), (0, 0))
-        ax.axis("off")
-        ax.set_title("CR-RXD")
-        img = ax.imshow(np.zeros((64,64)))    
+    if status == 1:
+        if fun == R_RXD:
+            str = 'R_RXD'
+            plt.figure(str)
+            plt.title(str)
+            plt.axis("off")
+            xrow = plt.subplot2grid((1, 1), (0, 0))
+            xrow.set_title(str)
+            xrow.axis("off")
+            img = xrow.imshow(np.zeros((64,64)))
+        if fun == K_RXD:
+            str = 'K_RXD'
+            plt.figure(str)
+            plt.title(str)
+            plt.axis("off")
+            xrow = plt.subplot2grid((1, 1), (0, 0))
+            xrow.axis("off")
+            xrow.set_title(str)
+            img = xrow.imshow(np.zeros((64,64)))
         
-    N = him.shape[0]
-    l = int(np.sqrt(N))
-    rs_img = np.zeros((l,l))
-    oneD_img = np.zeros(N)
-    time_list = []
-    for i in range (N):
-                
-        if i <= start_pixel :
-            s_time = time.perf_counter()
-            pre_R,oneD_img[0:i+1] = r_rxd(him[0:i+1])
-            e_time = time.perf_counter() - s_time
-        if i > start_pixel :
-            s_time = time.perf_counter()
-            oneD_img[i] = cr_rxd(him[i],him[0:i+1])
-            e_time = time.perf_counter() - s_time
-        if plot == True:
-            rs_img = np.reshape(oneD_img,(l,l))
-            img.set_data(rs_img)
-            img.set_clim(vmin=np.min(rs_img), vmax=np.max(rs_img))
+   
+    for i in range (N):      
+        if i <= startPixel :
+            timeA = time.perf_counter()
+            timeB = time.perf_counter() - timeA
+            rtImg[0:i+1] = fun(him[0:i+1])
+            temparr.append(rtImg)
+        if i > startPixel :
+            timeA = time.perf_counter()
+            timeB = time.perf_counter() - timeA
+            rtImg[i] = fun(him[i],him[0:i+1])
+            temparr.append(rtImg)
+        if status == 1:
+            tempImg = np.reshape(rtImg,(ln,ln))
+            img.set_data(tempImg)
+            vmin=np.min(tempImg)
+            vmax=np.max(tempImg)
+            img.set_clim(vmin, vmax)
             plt.pause(1e-60)
             
-        time_list.append(e_time)
+        Time.append(timeB)
         
-    return time_list,oneD_img
+    return Time,rtImg
 
-def print_ck_rxd(him,plot):
-    
-    if plot == True:
-        plt.figure("ck_rxd")
-        ax = plt.subplot2grid((1, 1), (0, 0))
-        ax.axis("off")
-        ax.set_title("CK-RXD")
-        img = ax.imshow(np.zeros((64,64)))
-        
+
+def RT_FUN_RXD_PLOT(him, status,fun,fun2):
+    str = ''
     N = him.shape[0]
-    l = int(np.sqrt(N))
-    rs_img = np.zeros((l,l))
-    oneD_img = np.zeros(N)
-    time_list = []
+    ln = np.sqrt(N)
+    ln = int(ln)
+    temparr=[]
+    Time = []
+    tempImg = np.zeros((ln,ln))
+    rtImg = np.zeros(N)
     
-    for i in range (N):
-                
-        if i <= start_pixel :
-            s_time = time.perf_counter()
-            pre_K,u,oneD_img[0:i+1] = k_rxd(him[0:i+1])
-            e_time = time.perf_counter() - s_time
-        if i > start_pixel :
-            s_time = time.perf_counter()
-            u,oneD_img[i] = ck_rxd(him[i],him[0:i+1])
-            e_time = time.perf_counter() - s_time
-        if plot == True:
-            rs_img = np.reshape(oneD_img,(l,l))
-            img.set_data(rs_img)
-            img.set_clim(vmin=np.min(rs_img), vmax=np.max(rs_img))
-            plt.pause(1e-60)
+
+    if status == 1:
+        if fun2 == RT_CR_RXD:
+            str = "RT_CR_RXD"
+            plt.figure(str)
+            xrow = plt.subplot2grid((1, 1), (0, 0))
+            xrow.axis("off")
+            xrow.set_title(str)
+            img = xrow.imshow(np.zeros((64,64)))
+        if fun2 == RT_CK_RXD:
+            str = "RT_CK_RXD"
+            plt.figure(str)
+            xrow = plt.subplot2grid((1, 1), (0, 0))
+            xrow.axis("off")
+            xrow.set_title(str)
+            img = xrow.imshow(np.zeros((64,64)))
             
-        time_list.append(e_time)
-            
-    return time_list,oneD_img
-
-           
-    
-def print_rt_cr_rxd(him, plot):
-    
-    if plot == True:
-        plt.figure("rt_cr_rxd")
-        ax = plt.subplot2grid((1, 1), (0, 0))
-        ax.axis("off")
-        ax.set_title("RT-CR-RXD")
-        img = ax.imshow(np.zeros((64,64)))
-        
-    N = him.shape[0]
-    l = int(np.sqrt(N))
-    rs_img = np.zeros((l,l))
-    oneD_img = np.zeros(N)
-    time_list = []
-    for i in range (N):
-        
-        if i <= start_pixel :
-            s_time = time.perf_counter()
-            pre_R,oneD_img[:i+1]=r_rxd(him[:i+1])
-            e_time = time.perf_counter() - s_time
-        if i > start_pixel :
-            pre_R = np.linalg.inv(pre_R)
-            s_time = time.perf_counter()
-            pre_R,oneD_img[i:i+1] = rt_cr_rxd(him[i:i+1],i+1 ,pre_R)        
-            e_time = time.perf_counter() - s_time
-        if plot == True:
-            rs_img = np.reshape(oneD_img,(l,l))
-            img.set_data(rs_img)
-            img.set_clim(vmin=np.min(rs_img), vmax=np.max(rs_img))
-            plt.pause(1e-60)
-        
-        time_list.append(e_time)
-        
-    return time_list,oneD_img
-
-
-def print_rt_ck_rxd(him,plot):
-    
-    plot = False
-    if plot == True:
-        plt.figure("rt_ck_rxd")
-        ax = plt.subplot2grid((1, 1), (0, 0))
-        ax.axis("off")
-        ax.set_title("RT-CK-RXD")
-        img = ax.imshow(np.zeros((64,64)))    
-        
-    N = him.shape[0]
-    l = int(np.sqrt(N))
-    rs_img = np.zeros((l,l))
-    oneD_img = np.zeros(N)
-    time_list = []
  
     for i in range (N):
         
-        if i <= start_pixel :
-            s_time = time.perf_counter()
-            pre_K,pre_u,oneD_img[:i+1] = k_rxd(him[:i+1])
-            e_time = time.perf_counter() - s_time
-        if i > start_pixel :
-            pre_K = np.linalg.inv(pre_K)
-            s_time = time.perf_counter()            
-            pre_K,pre_u,oneD_img[i:i+1] = rt_ck_rxd(him[i:i+1],i+1,pre_K,pre_u)
-            e_time = time.perf_counter() - s_time
-        if plot == True:
-            rs_img = np.reshape(oneD_img,(l,l))
-            img.set_data(rs_img)
-            img.set_clim(vmin=np.min(rs_img), vmax=np.max(rs_img))
+        if i <= startPixel :
+            timeA = time.perf_counter()
+            timeB = time.perf_counter() - timeA
+            pre_R,rtImg[:i+1]=fun(him[:i+1])
+            temparr.append(pre_R,rtImg)
+           
+        if i > startPixel :
+            pre_R = np.linalg.inv(pre_R)
+            timeA = time.perf_counter()
+            timeB = time.perf_counter() - timeA
+            pre_R,rtImg[i:i+1] = fun2(him[i:i+1],i+1 ,pre_R)        
+            temparr.append(pre_R,rtImg)
+
+        if status == 1:
+            tempImg = np.reshape(rtImg,(ln,ln))
+            img.set_data(tempImg)
+            vmin=np.min(tempImg)
+            vmax=np.max(tempImg)
+            img.set_clim(vmin, vmax)
             plt.pause(1e-60)
+        
+        Time.append(timeB)
+        
+    return Time,rtImg
 
-        time_list.append(e_time)
 
-    return time_list,oneD_img
-
-
-#[y,x,z]
-def init_data():
+def loadData():
     filepath =  r"panel.npy"
     data =np.load(filepath,allow_pickle=True)
     him =np.array( data.item().get('HIM'),"double")
-    him=np.reshape(him,(4096,169))
+    N=him.shape[0]*him.shape[1] #64*64 = 4096
+    #ri=np.reshape(him,(N,him.shape[2])) #降維(3->2) N, 169bands
+    him=np.reshape(him,(N,him.shape[2]))
     return him
 
+
+''''畫圖'''
 if __name__ == '__main__':
-    
-    him = init_data()
 
-#   if plot == True then plot figure
+    startPixel = 170
+    MSE_R_RXD=[]
+    MSE_K_RXD=[]
+    him = loadData() #return reshape過的him
+
+    '''plt RXD'''
     print('R_RXD')
-    re1 = np.reshape(print_r_rxd(him,False),4096)
+    result_R_RXD = np.reshape(R_RXD_PLOT(him),4096)
     print('K_RXD')
-    re2 = np.reshape(print_k_rxd(him,False),4096)
-    print('CK_RXD')
-    time4,re4 = print_ck_rxd(him,False)
-    print('RT_CK_RXD')
-    time6,re6 = print_rt_ck_rxd(him,False)
-    print('CR_RXD')
-    time3,re3 = print_cr_rxd(him,False)
-    print('RT_CR_RXD')
-    time5,re5 = print_rt_cr_rxd(him,False)
-
-    mse_r_rxd=[]
-    mse_k_rxd=[]
+    result_K_RXD = np.reshape(K_RXD_PLOT(him),4096)
+    count = 0
+    fun = 0
+    fun2 = 0
+    status = 0
+    for i in range(4):
+        if(count == 0):
+            print('CR_RXD')
+            fun = R_RXD
+            costTime_R_CASAUL,result_CR_RXD = FUN_RXD_PLOT(him,status,fun)
+            count+1
+        if(count == 1):
+            print('CK_RXD')
+            fun = K_RXD
+            costTime_K_CASAUL,result_CK_RXD = FUN_RXD_PLOT(him,status,fun)
+            count+1
+        if(count == 2):
+            print('RT_CR_RXD')
+            costTime_R_WOODBURY,result_RT__CR_RXD = RT_FUN_RXD_PLOT(him,status,fun,fun2)
+            count+1
+        if(count == 3):
+            print('RT_CK_RXD')
+            costTime_K_WOODBURY,result_RT__CK_RXD = RT_FUN_RXD_PLOT(him,status,fun,fun2)
+ 
     
+
+    '''plt MSE'''
     for i in range(4096):
-          mse_r = mean_squared_error(re3[:i+1],re5[:i+1])
-          mse_r_rxd.append(mse_r)
-          mse_k = mean_squared_error(re4[:i+1],re6[:i+1])
-          mse_k_rxd.append(mse_k)
-          
-    plt.figure("mse_R")
+          MSE_R = mean_squared_error(result_CR_RXD[:i+1],result_RT__CR_RXD[:i+1])
+          MSE_R_RXD.append(MSE_R)
+          MSE_K = mean_squared_error(result_CK_RXD[:i+1],result_RT__CK_RXD[:i+1])
+          MSE_K_RXD.append(MSE_K) 
+    plt.figure("MSE_R")
     plt.title("MSE_R")
-    plt.plot(range(len(mse_r_rxd)),mse_r_rxd)
-             
-    plt.figure("mse_K")
+    plt.plot(range(len(MSE_R_RXD)),MSE_R_RXD)      
+    plt.figure("MSE_K")
     plt.title("MSE_K")
-    plt.plot(range(len(mse_k_rxd)),mse_k_rxd)
-             
-    plt.figure("computing time R")
-    plt.title("computing time R")
-    t3 = np.around(np.sum(time3), 5)
-    plt.plot(range(len(time3)), time3, 'b',label = 'Casaul : '+ str(t3), color = 'r')
-    t5 = np.around(np.sum(time5), 5)
-    plt.plot(range(len(time5)), time5, 'r',label ='Woodbury : '+  str(t5), color = 'b')
+    plt.plot(range(len(MSE_K_RXD)),MSE_K_RXD)
+
+    '''plt computing time'''           
+    plt.figure("R of computing time")
+    plt.title("R of computing time")
+    tempA = np.around(np.sum(costTime_R_CASAUL), 5)
+    plt.plot(range(len(costTime_R_CASAUL)), costTime_R_CASAUL, 'b',label = 'Casaul : '+ str(tempA), color = 'y')
+    tempC = np.around(np.sum(costTime_R_WOODBURY), 5)
+    plt.plot(range(len(costTime_R_WOODBURY)), costTime_R_WOODBURY, 'r',label ='WoodBury : '+  str(tempC), color = 'g')
     plt.legend()
     plt.xlim(0,4096)
-    
-    plt.figure("computing time K")
-    plt.title("computing time K")
-    t4 = np.around(np.sum(time4), 5)
-    plt.plot(range(len(time4)), time4, 'b', label='Casaul : '+ str(t4), color = 'r')
-    t6 = np.around(np.sum(time6), 5)
-    plt.plot(range(len(time6)), time6, 'r', label='Woodbury : '+  str(t6), color = 'g')
+    plt.figure("K of computing time")
+    plt.title("K of computing time")
+    tempB = np.around(np.sum(costTime_K_CASAUL), 5)
+    plt.plot(range(len(costTime_K_CASAUL)), costTime_K_CASAUL, 'b', label='Casaul : '+ str(tempB), color = 'y')
+    tempD = np.around(np.sum(costTime_K_WOODBURY), 5)
+    plt.plot(range(len(costTime_K_WOODBURY)), costTime_K_WOODBURY, 'r', label='WoodBury : '+  str(tempD), color = 'g')
     plt.legend()
     plt.xlim(0, 4096)
     
     plt.show()
 
-# npz
+'''寫入res.npz'''
 np.savez('res.npz',
-         r_rxd=re1,k_rxd=re2,
-         cr_rxd=re3,ck_rxd=re4,
-         rt_cr_rxd=re5,rt_ck_rxd=re6,
-         mse_r=mse_r_rxd,
-         mse_k=mse_k_rxd,
-         t_cr=time3,
-         t_ck=time4,
-         t_rt_cr=time5,
-         t_rt_ck=time6)
+         R_RXD=result_R_RXD,
+         K_RXD=result_K_RXD,
+         CR_RXD=result_CR_RXD,
+         CK_RXD=result_CK_RXD,
+         RT_CR_RXD=result_RT__CR_RXD,
+         RT_CK_RXD=result_RT__CK_RXD,
+         MSE_R=MSE_R_RXD,
+         MSE_K=MSE_K_RXD,
+         t_cr=costTime_R_CASAUL,
+         t_ck=costTime_K_CASAUL,
+         t_rt_cr=costTime_R_WOODBURY,
+         t_rt_ck=costTime_K_WOODBURY)
 

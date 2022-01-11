@@ -169,7 +169,7 @@ class Ui_MainWindow(object):
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
-        MainWindow.setWindowTitle(_translate("MainWindow", "RXD-GUI"))
+        MainWindow.setWindowTitle(_translate("MainWindow", "GUI"))
         self.label_6.setText(_translate("MainWindow", "WOODBURY"))
         self.label_7.setText(_translate("MainWindow", "CASUAL"))
         self.pushButton_2.setText(_translate("MainWindow", "CAL R"))
